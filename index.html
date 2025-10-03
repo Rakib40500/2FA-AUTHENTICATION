@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAKIB 2FA Tools</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsSHA/2.4.2/sha.js"></script>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f3f4f6;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .card-wrapper {
+    padding: 4px;
+    border-radius: 14px;
+    background: linear-gradient(270deg, #ff00cc, #3333ff, #00ffcc, #ff6600);
+    background-size: 800% 800%;
+    animation: gradientMove 8s ease infinite;
+  }
+  @keyframes gradientMove {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .container {
+    background: #fff;
+    padding: 25px;
+    border-radius: 12px;
+    text-align: center;
+    width: 320px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  h2 { margin-bottom: 20px; color: #333; }
+  input {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    text-align: center;
+  }
+  .code-box {
+    font-size: 28px;
+    font-weight: bold;
+    background: #222;
+    color: #0f0;
+    padding: 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+  }
+  .code-box:hover { background: #333; }
+  .msg { margin-top: 10px; font-size: 14px; color: #555; }
+  .expire { margin-top: 10px; font-size: 14px; color: #eab308; font-weight: bold; }
+  .progress-container { margin-top: 8px; width: 100%; height: 6px; background: #ddd; border-radius: 4px; overflow: hidden; }
+  .progress-bar { height: 100%; background: linear-gradient(90deg, #22c55e, #ef4444); width: 100%; transition: width 1s linear; }
+</style>
+</head>
+<body>
+<div class="card-wrapper">
+  <div class="container">
+    <h2>RAKIB 2FA Tools</h2>
+    <input type="text" id="secret" placeholder="Paste your secret key">
+    <div id="codeBox" class="code-box">------</div>
+    <div class="expire" id="expire"></div>
+    <div class="progress-container"><div id="progressBar" class="progress-bar"></div></div>
+    <div class="msg" id="msg">Click code to copy</div>
+  </div>
+</div>
+
+<script>
+const secretInput = document.getElementById("secret");
+const codeBox = document.getElementById("codeBox");
+const msg = document.getElementById("msg");
+const expireBox = document.getElementById("expire");
+const progressBar = document.getElementById("progressBar");
+
+let secret = "";
+let interval;
+
+function base32tohex(base32) {
+  const base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "", hex = "";
+  base32 = base32.replace(/=+$/, "");
+  for (let i=0;i<base32.length;i++){
+    const val = base32chars.indexOf(base32.charAt(i).toUpperCase());
+    if(val>=0) bits += val.toString(2).padStart(5,"0");
+  }
+  for(let i=0;i+4<=bits.length;i+=4){
+    hex += parseInt(bits.substr(i,4),2).toString(16);
+  }
+  return hex;
+}
+
+function generateOTP(secret){
+  const epoch=Math.floor(new Date().getTime()/1000.0);
+  const time=Math.floor(epoch/30).toString(16).padStart(16,"0");
+  const key=base32tohex(secret);
+  const hmac=new jsSHA("SHA-1","HEX");
+  hmac.setHMACKey(key,"HEX");
+  hmac.update(time);
+  const hmacResult=hmac.getHMAC("HEX");
+  const offset=parseInt(hmacResult.substr(hmacResult.length-1),16);
+  const otp=(parseInt(hmacResult.substr(offset*2,8),16)&0x7fffffff)+"";
+  return otp.substr(otp.length-6,6);
+}
+
+function startOTP() {
+  if(interval) clearInterval(interval);
+  interval=setInterval(()=>{
+    if(secret){
+      try{
+        const otp=generateOTP(secret);
+        codeBox.innerText=otp;
+        const epoch=Math.floor(new Date().getTime()/1000.0);
+        const countdown=30-(epoch%30);
+        expireBox.innerText="Expire Later: "+countdown+" second";
+        progressBar.style.width=(countdown/30*100)+"%";
+      }catch{
+        codeBox.innerText="ERROR";
+      }
+    }
+  },1000);
+}
+
+function copyToClipboard(text){
+  if(!text) return;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=> {
+      msg.innerText="Copied!";
+      setTimeout(()=>msg.innerText="Click code to copy",2000);
+    }).catch(()=> fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text){
+  const tempInput=document.createElement("textarea");
+  tempInput.value=text;
+  document.body.appendChild(tempInput);
+  tempInput.select();
+  try{
+    document.execCommand("copy");
+    msg.innerText="Copied!";
+  }catch{
+    msg.innerText="Copy failed!";
+  }
+  document.body.removeChild(tempInput);
+  setTimeout(()=>msg.innerText="Click code to copy",2000);
+}
+
+function updateSecretAndGenerate(val){
+  secret=val.trim();
+  if(secret){
+    try{
+      const otp=generateOTP(secret);
+      codeBox.innerText=otp;
+      startOTP();
+      secretInput.value="";
+      // Auto-copy after 300ms
+      setTimeout(()=> copyToClipboard(otp),300);
+    }catch{
+      codeBox.innerText="ERROR";
+    }
+  }else{
+    codeBox.innerText="------";
+  }
+}
+
+// Paste event (updated)
+secretInput.addEventListener("paste", (e) => {
+  e.preventDefault();
+  const pasteData = (e.clipboardData || window.clipboardData).getData('text');
+  secretInput.value = pasteData;
+  updateSecretAndGenerate(pasteData);
+});
+
+// Input event
+secretInput.addEventListener("input", () => updateSecretAndGenerate(secretInput.value));
+
+// Click on code box
+codeBox.addEventListener("click",()=> {
+  if(codeBox.innerText && codeBox.innerText!=="------"){
+    copyToClipboard(codeBox.innerText);
+  }
+});
+</script>
+</body>
+</html>
